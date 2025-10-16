@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar, Users, Home, LogOut, Download, Plus, Trash2, CheckCircle, GripVertical, LayoutDashboard } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { initializeApp } from 'firebase/app';
+import { getFirestore, collection, getDocs, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc } from 'firebase/firestore';
+import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
 
 // Firebase 설정 (환경 변수에서 로드)
 const firebaseConfig = {
@@ -116,15 +119,8 @@ const HotelRoomManager = () => {
       return;
     }
 
-    const initFirebase = async () => {
+    const initFirebase = () => {
       try {
-        // Firebase 동적 import
-        const { initializeApp } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js');
-        const { getFirestore, collection, getDocs, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc } = 
-          await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
-        const { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } = 
-          await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js');
-
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
         const auth = getAuth(app);
@@ -391,7 +387,7 @@ const HotelRoomManager = () => {
   };
 
   const deleteWorker = async (worker) => {
-    if (!confirm('이 직원을 삭제하시겠습니까?')) return;
+    if (!window.confirm('이 직원을 삭제하시겠습니까?')) return;
 
     try {
       const { deleteDoc, doc } = window.firebaseFunctions;
@@ -495,7 +491,7 @@ const HotelRoomManager = () => {
   };
 
   const deleteRoom = async (room) => {
-    if (!confirm('이 객실을 삭제하시겠습니까?')) return;
+    if (!window.confirm('이 객실을 삭제하시겠습니까?')) return;
 
     try {
       const { deleteDoc, doc } = window.firebaseFunctions;
