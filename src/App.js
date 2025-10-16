@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Users, Home, LogOut, Download, Plus, Trash2, CheckCircle, GripVertical, LayoutDashboard } from 'lucide-react';
+import { Users, Home, LogOut, Download, Plus, Trash2, CheckCircle, GripVertical, LayoutDashboard } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, getDocs, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc } from 'firebase/firestore';
@@ -134,7 +134,7 @@ const HotelRoomManager = () => {
         });
 
         // Workers 실시간 구독
-        const workersUnsubscribe = onSnapshot(collection(db, 'workers'), (snapshot) => {
+        onSnapshot(collection(db, 'workers'), (snapshot) => {
           const workersData = snapshot.docs.map(doc => ({
             firestoreId: doc.id,
             ...doc.data()
@@ -145,7 +145,7 @@ const HotelRoomManager = () => {
         });
 
         // Rooms 실시간 구독
-        const roomsUnsubscribe = onSnapshot(collection(db, 'rooms'), (snapshot) => {
+        onSnapshot(collection(db, 'rooms'), (snapshot) => {
           const roomsData = snapshot.docs.map(doc => ({
             firestoreId: doc.id,
             ...doc.data()
@@ -156,7 +156,7 @@ const HotelRoomManager = () => {
         });
 
         // Assignments 실시간 구독
-        const assignmentsUnsubscribe = onSnapshot(collection(db, 'assignments'), (snapshot) => {
+        onSnapshot(collection(db, 'assignments'), (snapshot) => {
           const assignmentsData = snapshot.docs.map(doc => ({
             firestoreId: doc.id,
             ...doc.data()
