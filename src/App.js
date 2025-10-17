@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Home, LogOut, Download, Plus, Trash2, CheckCircle, GripVertical, LayoutDashboard } from 'lucide-react';
+import { Users, Home, LogOut, Download, Plus, Trash2, CheckCircle, GripVertical, LayoutDashboard, ClipboardList } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, getDocs, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc } from 'firebase/firestore';
@@ -89,7 +89,8 @@ const HotelRoomManager = () => {
   ]);
   
   const [assignments, setAssignments] = useState([]);
-  
+  const [assignmentLogs, setAssignmentLogs] = useState([]);
+
   // Form states
   const [newWorkerName, setNewWorkerName] = useState('');
   const [newRoomNumber, setNewRoomNumber] = useState('');
@@ -100,7 +101,10 @@ const HotelRoomManager = () => {
   const [dashboardDate, setDashboardDate] = useState(new Date().toISOString().split('T')[0]);
   const [exportStartDate, setExportStartDate] = useState('');
   const [exportEndDate, setExportEndDate] = useState('');
-  
+  const [logFilterDate, setLogFilterDate] = useState('');
+  const [logFilterAction, setLogFilterAction] = useState('all');
+  const [historyFilterDate, setHistoryFilterDate] = useState('');
+
   // UI states
   const [activeTab, setActiveTab] = useState('dashboard');
   const [showAddWorker, setShowAddWorker] = useState(false);
@@ -164,6 +168,15 @@ const HotelRoomManager = () => {
           setAssignments(assignmentsData);
         });
 
+        // Assignment Logs 실시간 구독
+        onSnapshot(collection(db, 'assignmentLogs'), (snapshot) => {
+          const logsData = snapshot.docs.map(doc => ({
+            firestoreId: doc.id,
+            ...doc.data()
+          }));
+          setAssignmentLogs(logsData);
+        });
+
         // Firebase 함수들을 window에 저장
         window.firebaseDB = db;
         window.firebaseAuth = auth;
@@ -214,6 +227,35 @@ const HotelRoomManager = () => {
     return rooms.filter(r => !assignedRoomIds.includes(r.id));
   };
 
+  // Logging helper function
+  const logAssignmentAction = async (action, workerId, roomId, date, additionalInfo = {}) => {
+    try {
+      const { addDoc, collection } = window.firebaseFunctions;
+      const db = window.firebaseDB;
+
+      const worker = workers.find(w => w.id === workerId);
+      const room = rooms.find(r => r.id === roomId);
+
+      const logEntry = {
+        action, // 'assign', 'unassign', 'complete', 'uncomplete'
+        workerId,
+        workerName: worker ? worker.name : '알 수 없음',
+        roomId,
+        roomNumber: room ? room.number : '알 수 없음',
+        date,
+        timestamp: new Date().toISOString(),
+        performedBy: currentUser ? currentUser.role : 'system',
+        performedByName: currentUser ? (currentUser.role === 'admin' ? currentUser.email : currentUser.name) : 'system',
+        ...additionalInfo
+      };
+
+      await addDoc(collection(db, 'assignmentLogs'), logEntry);
+    } catch (error) {
+      console.error('로그 기록 오류:', error);
+      // Don't alert the user for logging errors to avoid disrupting the main flow
+    }
+  };
+
   // Drag and Drop handlers
   const handleDragStart = (e, roomId) => {
     setDraggedRoom(roomId);
@@ -248,6 +290,10 @@ const HotelRoomManager = () => {
       );
       if (oldAssignment && oldAssignment.firestoreId) {
         await deleteDoc(doc(db, 'assignments', oldAssignment.firestoreId));
+        // Log unassignment
+        await logAssignmentAction('unassign', oldAssignment.workerId, draggedRoom, dashboardDate, {
+          reason: 'reassignment'
+        });
       }
 
       // Add new assignment
@@ -257,10 +303,17 @@ const HotelRoomManager = () => {
         roomId: draggedRoom,
         date: dashboardDate,
         completed: false,
-        assignedAt: new Date().toISOString()
+        assignedAt: new Date().toISOString(),
+        assignedBy: currentUser ? (currentUser.role === 'admin' ? currentUser.email : currentUser.name) : 'system',
+        assignedByRole: currentUser ? currentUser.role : 'system'
       };
 
       await addDoc(collection(db, 'assignments'), newAssignment);
+
+      // Log assignment
+      await logAssignmentAction('assign', workerId, draggedRoom, dashboardDate, {
+        method: 'drag_and_drop'
+      });
     } catch (error) {
       console.error('배정 오류:', error);
       alert('배정 중 오류가 발생했습니다.');
@@ -280,9 +333,14 @@ const HotelRoomManager = () => {
       const oldAssignment = assignments.find(
         a => a.roomId === draggedRoom && a.date === dashboardDate
       );
-      
+
       if (oldAssignment && oldAssignment.firestoreId) {
         await deleteDoc(doc(db, 'assignments', oldAssignment.firestoreId));
+
+        // Log unassignment
+        await logAssignmentAction('unassign', oldAssignment.workerId, draggedRoom, dashboardDate, {
+          method: 'drag_to_unassigned'
+        });
       }
     } catch (error) {
       console.error('배정 해제 오류:', error);
@@ -300,9 +358,14 @@ const HotelRoomManager = () => {
       const assignment = assignments.find(
         a => a.roomId === roomId && a.date === date
       );
-      
+
       if (assignment && assignment.firestoreId) {
         await deleteDoc(doc(db, 'assignments', assignment.firestoreId));
+
+        // Log unassignment
+        await logAssignmentAction('unassign', assignment.workerId, roomId, date, {
+          method: 'manual_removal'
+        });
       }
     } catch (error) {
       console.error('삭제 오류:', error);
@@ -539,9 +602,17 @@ const HotelRoomManager = () => {
           roomId,
           date: selectedDate,
           completed: false,
-          assignedAt: new Date().toISOString()
+          assignedAt: new Date().toISOString(),
+          assignedBy: currentUser ? (currentUser.role === 'admin' ? currentUser.email : currentUser.name) : 'system',
+          assignedByRole: currentUser ? currentUser.role : 'system'
         };
         await addDoc(collection(db, 'assignments'), newAssignment);
+
+        // Log assignment
+        await logAssignmentAction('assign', parseInt(selectedWorkerId), roomId, selectedDate, {
+          method: 'form_assignment',
+          bulkAssignment: selectedRoomIds.length > 1
+        });
       }
 
       setSelectedRoomIds([]);
@@ -559,9 +630,21 @@ const HotelRoomManager = () => {
       const db = window.firebaseDB;
 
       if (assignment.firestoreId) {
+        const newCompletedState = !assignment.completed;
         await updateDoc(doc(db, 'assignments', assignment.firestoreId), {
-          completed: !assignment.completed
+          completed: newCompletedState
         });
+
+        // Log completion toggle
+        await logAssignmentAction(
+          newCompletedState ? 'complete' : 'uncomplete',
+          assignment.workerId,
+          assignment.roomId,
+          assignment.date,
+          {
+            completedAt: newCompletedState ? new Date().toISOString() : null
+          }
+        );
       }
     } catch (error) {
       console.error('완료 상태 변경 오류:', error);
@@ -855,6 +938,13 @@ const HotelRoomManager = () => {
             className={`px-4 py-2 rounded-lg whitespace-nowrap font-semibold transition ${activeTab === 'export' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700'}`}
           >
             내보내기
+          </button>
+          <button
+            onClick={() => setActiveTab('logs')}
+            className={`px-4 py-2 rounded-lg whitespace-nowrap font-semibold transition flex items-center space-x-2 ${activeTab === 'logs' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700'}`}
+          >
+            <ClipboardList className="w-4 h-4" />
+            <span>활동 로그</span>
           </button>
         </div>
 
@@ -1211,28 +1301,91 @@ const HotelRoomManager = () => {
 
         {activeTab === 'history' && (
           <div className="bg-white rounded-lg shadow-md p-6">
-            <h2 className="text-xl font-bold mb-4">배정 기록</h2>
-            
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold">배정 기록</h2>
+              <div className="flex items-center space-x-2">
+                <input
+                  type="date"
+                  value={historyFilterDate}
+                  onChange={(e) => setHistoryFilterDate(e.target.value)}
+                  className="px-3 py-2 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none"
+                  placeholder="전체 날짜"
+                />
+                {historyFilterDate && (
+                  <button
+                    onClick={() => setHistoryFilterDate('')}
+                    className="text-sm text-blue-600 hover:text-blue-800 underline whitespace-nowrap"
+                  >
+                    전체 보기
+                  </button>
+                )}
+              </div>
+            </div>
+
             <div className="space-y-2 max-h-96 overflow-y-auto">
-              {assignments.length === 0 ? (
-                <p className="text-gray-500 text-center py-4">배정 기록이 없습니다</p>
-              ) : (
-                [...assignments]
-                  .sort((a, b) => b.date.localeCompare(a.date) || new Date(b.assignedAt) - new Date(a.assignedAt))
-                  .map(assignment => (
-                    <div key={assignment.firestoreId || assignment.id} className="p-3 bg-gray-50 rounded-lg">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <p className="font-semibold">{getWorkerName(assignment.workerId)} → {getRoomNumber(assignment.roomId)}호</p>
-                          <p className="text-sm text-gray-600">날짜: {assignment.date}</p>
-                          <p className="text-xs text-gray-500">배정 시간: {new Date(assignment.assignedAt).toLocaleString('ko-KR')}</p>
+              {(() => {
+                let filteredAssignments = assignments;
+
+                // Apply date filter
+                if (historyFilterDate) {
+                  filteredAssignments = filteredAssignments.filter(a => a.date === historyFilterDate);
+                }
+
+                // Sort by date and time
+                filteredAssignments = [...filteredAssignments].sort((a, b) =>
+                  b.date.localeCompare(a.date) || new Date(b.assignedAt) - new Date(a.assignedAt)
+                );
+
+                if (filteredAssignments.length === 0) {
+                  return (
+                    <p className="text-gray-500 text-center py-4">
+                      {historyFilterDate ? '해당 날짜의 배정 기록이 없습니다' : '배정 기록이 없습니다'}
+                    </p>
+                  );
+                }
+
+                return filteredAssignments.map(assignment => (
+                  <div key={assignment.firestoreId || assignment.id} className="p-4 bg-gray-50 rounded-lg border-l-4 border-blue-400">
+                    <div className="flex justify-between items-start mb-2">
+                      <div className="flex-1">
+                        <p className="font-semibold text-lg text-gray-900">
+                          {getWorkerName(assignment.workerId)} → {getRoomNumber(assignment.roomId)}호
+                        </p>
+                        <div className="mt-2 space-y-1">
+                          <p className="text-sm text-gray-700">
+                            <span className="font-semibold">날짜:</span> {assignment.date}
+                          </p>
+                          <p className="text-sm text-gray-700">
+                            <span className="font-semibold">배정 시간:</span> {new Date(assignment.assignedAt).toLocaleString('ko-KR')}
+                          </p>
+                          {assignment.assignedBy && (
+                            <p className="text-sm text-gray-700">
+                              <span className="font-semibold">배정자:</span>{' '}
+                              <span className="text-blue-600">{assignment.assignedBy}</span>
+                              {assignment.assignedByRole === 'admin' && ' (관리자)'}
+                              {assignment.assignedByRole === 'worker' && ' (직원)'}
+                            </p>
+                          )}
                         </div>
-                        <span className={`text-sm px-2 py-1 rounded ${assignment.completed ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                          {assignment.completed ? '완료' : '대기중'}
-                        </span>
                       </div>
+                      <span className={`text-sm px-3 py-1 rounded font-semibold ${assignment.completed ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                        {assignment.completed ? '완료' : '대기중'}
+                      </span>
                     </div>
-                  ))
+                  </div>
+                ));
+              })()}
+            </div>
+
+            <div className="mt-4 p-4 bg-blue-50 rounded-lg">
+              <p className="text-sm text-gray-700">
+                <strong>전체 배정 기록:</strong> {assignments.length}건
+              </p>
+              {historyFilterDate && (
+                <p className="text-sm text-gray-700 mt-1">
+                  <strong>{historyFilterDate} 기록:</strong>{' '}
+                  {assignments.filter(a => a.date === historyFilterDate).length}건
+                </p>
               )}
             </div>
           </div>
@@ -1279,6 +1432,183 @@ const HotelRoomManager = () => {
                   <strong>포함 내용:</strong> 날짜, 직원, 객실, 상태, 배정 시간
                 </p>
               </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'logs' && (
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <h2 className="text-xl font-bold mb-4">활동 로그</h2>
+
+            <div className="space-y-4 mb-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">날짜 필터</label>
+                  <input
+                    type="date"
+                    value={logFilterDate}
+                    onChange={(e) => setLogFilterDate(e.target.value)}
+                    className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none"
+                    placeholder="전체 날짜"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">활동 필터</label>
+                  <select
+                    value={logFilterAction}
+                    onChange={(e) => setLogFilterAction(e.target.value)}
+                    className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none"
+                  >
+                    <option value="all">전체 활동</option>
+                    <option value="assign">배정</option>
+                    <option value="unassign">배정 해제</option>
+                    <option value="complete">완료 표시</option>
+                    <option value="uncomplete">완료 취소</option>
+                  </select>
+                </div>
+              </div>
+
+              {logFilterDate || logFilterAction !== 'all' ? (
+                <button
+                  onClick={() => {
+                    setLogFilterDate('');
+                    setLogFilterAction('all');
+                  }}
+                  className="text-sm text-blue-600 hover:text-blue-800 underline"
+                >
+                  필터 초기화
+                </button>
+              ) : null}
+            </div>
+
+            <div className="space-y-2 max-h-96 overflow-y-auto">
+              {(() => {
+                let filteredLogs = assignmentLogs;
+
+                // Apply date filter
+                if (logFilterDate) {
+                  filteredLogs = filteredLogs.filter(log => log.date === logFilterDate);
+                }
+
+                // Apply action filter
+                if (logFilterAction !== 'all') {
+                  filteredLogs = filteredLogs.filter(log => log.action === logFilterAction);
+                }
+
+                // Sort by timestamp (newest first)
+                filteredLogs = [...filteredLogs].sort((a, b) =>
+                  new Date(b.timestamp) - new Date(a.timestamp)
+                );
+
+                if (filteredLogs.length === 0) {
+                  return (
+                    <p className="text-gray-500 text-center py-8">
+                      {logFilterDate || logFilterAction !== 'all'
+                        ? '필터 조건에 맞는 로그가 없습니다'
+                        : '활동 로그가 없습니다'}
+                    </p>
+                  );
+                }
+
+                return filteredLogs.map((log) => {
+                  // Determine badge color and text based on action
+                  let badgeClass = '';
+                  let actionText = '';
+
+                  switch(log.action) {
+                    case 'assign':
+                      badgeClass = 'bg-blue-100 text-blue-700';
+                      actionText = '배정';
+                      break;
+                    case 'unassign':
+                      badgeClass = 'bg-red-100 text-red-700';
+                      actionText = '배정 해제';
+                      break;
+                    case 'complete':
+                      badgeClass = 'bg-green-100 text-green-700';
+                      actionText = '완료 표시';
+                      break;
+                    case 'uncomplete':
+                      badgeClass = 'bg-yellow-100 text-yellow-700';
+                      actionText = '완료 취소';
+                      break;
+                    default:
+                      badgeClass = 'bg-gray-100 text-gray-700';
+                      actionText = log.action;
+                  }
+
+                  return (
+                    <div key={log.firestoreId || log.timestamp} className="p-3 bg-gray-50 rounded-lg border-l-4 border-blue-500">
+                      <div className="flex justify-between items-start mb-2">
+                        <span className={`text-xs px-2 py-1 rounded font-semibold ${badgeClass}`}>
+                          {actionText}
+                        </span>
+                        <span className="text-xs text-gray-500">
+                          {new Date(log.timestamp).toLocaleString('ko-KR')}
+                        </span>
+                      </div>
+
+                      <div className="space-y-1">
+                        <p className="text-sm">
+                          <span className="font-semibold text-gray-700">직원:</span>{' '}
+                          <span className="text-gray-900">{log.workerName}</span>
+                        </p>
+                        <p className="text-sm">
+                          <span className="font-semibold text-gray-700">객실:</span>{' '}
+                          <span className="text-gray-900">{log.roomNumber}호</span>
+                        </p>
+                        <p className="text-sm">
+                          <span className="font-semibold text-gray-700">날짜:</span>{' '}
+                          <span className="text-gray-900">{log.date}</span>
+                        </p>
+                        <p className="text-sm">
+                          <span className="font-semibold text-gray-700">수행자:</span>{' '}
+                          <span className="text-gray-900">
+                            {log.performedByName}
+                            {log.performedBy === 'admin' && ' (관리자)'}
+                            {log.performedBy === 'worker' && ' (직원)'}
+                          </span>
+                        </p>
+
+                        {log.method && (
+                          <p className="text-xs text-gray-600 mt-1">
+                            방법: {
+                              log.method === 'drag_and_drop' ? '드래그 앤 드롭' :
+                              log.method === 'form_assignment' ? '폼 배정' :
+                              log.method === 'manual_removal' ? '수동 삭제' :
+                              log.method === 'drag_to_unassigned' ? '미배정으로 드래그' :
+                              log.method
+                            }
+                          </p>
+                        )}
+
+                        {log.reason && (
+                          <p className="text-xs text-gray-600">
+                            사유: {
+                              log.reason === 'reassignment' ? '재배정' : log.reason
+                            }
+                          </p>
+                        )}
+
+                        {log.bulkAssignment && (
+                          <p className="text-xs text-purple-600 font-semibold">
+                            대량 배정의 일부
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+
+            <div className="mt-4 p-4 bg-blue-50 rounded-lg">
+              <p className="text-sm text-gray-700">
+                <strong>전체 로그:</strong> {assignmentLogs.length}건
+              </p>
+              <p className="text-xs text-gray-600 mt-1">
+                모든 배정, 배정 해제, 완료 표시 활동이 자동으로 기록됩니다.
+              </p>
             </div>
           </div>
         )}
