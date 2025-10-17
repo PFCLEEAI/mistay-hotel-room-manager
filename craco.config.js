@@ -1,15 +1,15 @@
 module.exports = {
   webpack: {
     configure: (webpackConfig) => {
-      // Set webpack target to support modern ES features including dynamic imports
-      webpackConfig.target = 'web';
+      // Ensure the bundle targets environments with dynamic import support
+      webpackConfig.target = ['web', 'es2020'];
 
-      // Ensure output is ES6+ compatible
+      // Preserve existing output options while enabling dynamic imports explicitly
       webpackConfig.output = {
         ...webpackConfig.output,
         environment: {
+          ...(webpackConfig.output?.environment || {}),
           dynamicImport: true,
-          module: true,
         },
       };
 
