@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Home, LogOut, Download, Plus, Trash2, GripVertical, LayoutDashboard, ClipboardList, Tag, Bed, Droplet, Shirt, X, CheckCircle } from 'lucide-react';
+import { Users, Home, LogOut, Download, Plus, Trash2, GripVertical, LayoutDashboard, ClipboardList, Tag, Bed, Droplet, Shirt, X } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, getDocs, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc } from 'firebase/firestore';
@@ -705,6 +705,31 @@ const HotelRoomManager = () => {
     XLSX.writeFile(wb, `객실배정-${exportStartDate}-${exportEndDate}.xlsx`);
   };
 
+  // Tag logging helper function
+  const logTagAction = async (action, roomId, tagName) => {
+    try {
+      const { addDoc, collection } = window.firebaseFunctions;
+      const db = window.firebaseDB;
+
+      const room = rooms.find(r => r.id === roomId);
+
+      const logEntry = {
+        action, // 'tag_added', 'tag_removed'
+        roomId,
+        roomNumber: room ? room.number : '알 수 없음',
+        tagName,
+        timestamp: new Date().toISOString(),
+        performedBy: currentUser ? currentUser.role : 'system',
+        performedByName: currentUser ? (currentUser.role === 'admin' ? currentUser.email : currentUser.name) : 'system',
+        type: 'tag_operation'
+      };
+
+      await addDoc(collection(db, 'assignmentLogs'), logEntry);
+    } catch (error) {
+      console.error('태그 로그 기록 오류:', error);
+    }
+  };
+
   // Tag management functions
   const addTagToRoom = async (roomId, tagName) => {
     try {
@@ -731,6 +756,9 @@ const HotelRoomManager = () => {
           r.id === roomId ? { ...r, tags: updatedTags } : r
         ));
       }
+
+      // Log tag addition
+      await logTagAction('tag_added', roomId, tagName);
     } catch (error) {
       console.error('태그 추가 오류:', error);
       alert('태그 추가 중 오류가 발생했습니다.');
@@ -758,6 +786,9 @@ const HotelRoomManager = () => {
           r.id === roomId ? { ...r, tags: updatedTags } : r
         ));
       }
+
+      // Log tag removal
+      await logTagAction('tag_removed', roomId, tagName);
     } catch (error) {
       console.error('태그 제거 오류:', error);
       alert('태그 제거 중 오류가 발생했습니다.');
@@ -971,7 +1002,7 @@ const HotelRoomManager = () => {
                 return (
                   <div
                     key={assignment.firestoreId || assignment.id}
-                    className={`rounded-lg shadow-md p-4 transition ${assignment.completed ? 'bg-red-50 bg-opacity-50 border-2 border-red-400' : 'bg-white'}`}
+                    className={`rounded-lg shadow-md p-4 transition border-2 ${assignment.completed ? 'bg-red-50 border-red-300' : 'bg-white border-transparent'}`}
                   >
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center space-x-4">
@@ -1318,7 +1349,7 @@ const HotelRoomManager = () => {
                                 onDragStart={(e) => handleDragStart(e, assignment.roomId)}
                                 onDragOver={handleTagDragOver}
                                 onDrop={(e) => handleTagDrop(e, assignment.roomId)}
-                                className={`bg-white border-2 rounded-lg p-2 cursor-move hover:shadow-md transition ${assignment.completed ? 'border-red-400 bg-red-50 bg-opacity-50' : 'border-gray-300'}`}
+                                className={`border-2 rounded-lg p-2 cursor-move hover:shadow-md transition ${assignment.completed ? 'border-red-300 bg-red-50' : 'bg-white border-gray-300'}`}
                               >
                                 <div className="flex items-center justify-between mb-2">
                                   <div className="flex items-center space-x-2">
@@ -1628,7 +1659,7 @@ const HotelRoomManager = () => {
         {activeTab === 'history' && (
           <div className="bg-white rounded-lg shadow-md p-6">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-bold">배정 기록</h2>
+              <h2 className="text-xl font-bold">배정 기록 & 태그 활동</h2>
               <div className="flex items-center space-x-2">
                 <input
                   type="date"
@@ -1650,71 +1681,132 @@ const HotelRoomManager = () => {
 
             <div className="space-y-2 max-h-96 overflow-y-auto">
               {(() => {
-                let filteredAssignments = assignments;
+                // Combine assignments and tag logs
+                let allActivities = [];
+
+                // Add assignments
+                assignments.forEach(assignment => {
+                  allActivities.push({
+                    type: 'assignment',
+                    data: assignment,
+                    timestamp: assignment.assignedAt,
+                    date: assignment.date
+                  });
+                });
+
+                // Add tag logs
+                assignmentLogs.filter(log => log.type === 'tag_operation').forEach(log => {
+                  allActivities.push({
+                    type: 'tag',
+                    data: log,
+                    timestamp: log.timestamp,
+                    date: log.timestamp.split('T')[0] // Extract date from ISO timestamp
+                  });
+                });
 
                 // Apply date filter
                 if (historyFilterDate) {
-                  filteredAssignments = filteredAssignments.filter(a => a.date === historyFilterDate);
+                  allActivities = allActivities.filter(activity => activity.date === historyFilterDate);
                 }
 
-                // Sort by date and time
-                filteredAssignments = [...filteredAssignments].sort((a, b) =>
-                  b.date.localeCompare(a.date) || new Date(b.assignedAt) - new Date(a.assignedAt)
+                // Sort by timestamp (newest first)
+                allActivities = allActivities.sort((a, b) =>
+                  new Date(b.timestamp) - new Date(a.timestamp)
                 );
 
-                if (filteredAssignments.length === 0) {
+                if (allActivities.length === 0) {
                   return (
                     <p className="text-gray-500 text-center py-4">
-                      {historyFilterDate ? '해당 날짜의 배정 기록이 없습니다' : '배정 기록이 없습니다'}
+                      {historyFilterDate ? '해당 날짜의 기록이 없습니다' : '기록이 없습니다'}
                     </p>
                   );
                 }
 
-                return filteredAssignments.map(assignment => (
-                  <div key={assignment.firestoreId || assignment.id} className={`p-4 rounded-lg border-l-4 ${assignment.completed ? 'bg-green-50 border-green-400' : 'bg-gray-50 border-blue-400'}`}>
-                    <div className="flex justify-between items-start mb-2">
-                      <div className="flex-1">
-                        <p className="font-semibold text-lg text-gray-900">
-                          {getWorkerName(assignment.workerId)} → {getRoomNumber(assignment.roomId)}호
-                        </p>
-                        <div className="mt-2 space-y-1">
-                          <p className="text-sm text-gray-700">
-                            <span className="font-semibold">날짜:</span> {assignment.date}
-                          </p>
-                          <p className="text-sm text-gray-700">
-                            <span className="font-semibold">배정 시간:</span> {new Date(assignment.assignedAt).toLocaleString('ko-KR')}
-                          </p>
-                          {assignment.assignedBy && (
-                            <p className="text-sm text-gray-700">
-                              <span className="font-semibold">배정자:</span>{' '}
-                              <span className="text-blue-600">{assignment.assignedBy}</span>
-                              {assignment.assignedByRole === 'admin' && ' (관리자)'}
-                              {assignment.assignedByRole === 'worker' && ' (직원)'}
+                return allActivities.map((activity, idx) => {
+                  if (activity.type === 'assignment') {
+                    const assignment = activity.data;
+                    return (
+                      <div key={`assignment-${assignment.firestoreId || assignment.id}`} className={`p-4 rounded-lg border-l-4 ${assignment.completed ? 'bg-green-50 border-green-400' : 'bg-gray-50 border-blue-400'}`}>
+                        <div className="flex justify-between items-start mb-2">
+                          <div className="flex-1">
+                            <p className="font-semibold text-lg text-gray-900">
+                              {getWorkerName(assignment.workerId)} → {getRoomNumber(assignment.roomId)}호
                             </p>
-                          )}
-                          {assignment.completed && assignment.completedAt && (
-                            <div className="mt-2 pt-2 border-t border-green-200">
-                              <p className="text-sm text-green-700">
-                                <span className="font-semibold">✓ 완료 시간:</span> {new Date(assignment.completedAt).toLocaleString('ko-KR')}
+                            <div className="mt-2 space-y-1">
+                              <p className="text-sm text-gray-700">
+                                <span className="font-semibold">날짜:</span> {assignment.date}
                               </p>
-                              {assignment.completedBy && (
-                                <p className="text-sm text-green-700">
-                                  <span className="font-semibold">✓ 완료자:</span>{' '}
-                                  <span className="text-green-800">{assignment.completedBy}</span>
-                                  {assignment.completedByRole === 'admin' && ' (관리자)'}
-                                  {assignment.completedByRole === 'worker' && ' (직원)'}
+                              <p className="text-sm text-gray-700">
+                                <span className="font-semibold">배정 시간:</span> {new Date(assignment.assignedAt).toLocaleString('ko-KR')}
+                              </p>
+                              {assignment.assignedBy && (
+                                <p className="text-sm text-gray-700">
+                                  <span className="font-semibold">배정자:</span>{' '}
+                                  <span className="text-blue-600">{assignment.assignedBy}</span>
+                                  {assignment.assignedByRole === 'admin' && ' (관리자)'}
+                                  {assignment.assignedByRole === 'worker' && ' (직원)'}
                                 </p>
                               )}
+                              {assignment.completed && assignment.completedAt && (
+                                <div className="mt-2 pt-2 border-t border-green-200">
+                                  <p className="text-sm text-green-700">
+                                    <span className="font-semibold">✓ 완료 시간:</span> {new Date(assignment.completedAt).toLocaleString('ko-KR')}
+                                  </p>
+                                  {assignment.completedBy && (
+                                    <p className="text-sm text-green-700">
+                                      <span className="font-semibold">✓ 완료자:</span>{' '}
+                                      <span className="text-green-800">{assignment.completedBy}</span>
+                                      {assignment.completedByRole === 'admin' && ' (관리자)'}
+                                      {assignment.completedByRole === 'worker' && ' (직원)'}
+                                    </p>
+                                  )}
+                                </div>
+                              )}
                             </div>
-                          )}
+                          </div>
+                          <span className={`text-sm px-3 py-1 rounded font-semibold ${assignment.completed ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                            {assignment.completed ? '완료' : '대기중'}
+                          </span>
                         </div>
                       </div>
-                      <span className={`text-sm px-3 py-1 rounded font-semibold ${assignment.completed ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                        {assignment.completed ? '완료' : '대기중'}
-                      </span>
-                    </div>
-                  </div>
-                ));
+                    );
+                  } else {
+                    // Tag operation
+                    const log = activity.data;
+                    const isAdded = log.action === 'tag_added';
+                    return (
+                      <div key={`tag-${log.firestoreId || idx}`} className={`p-4 rounded-lg border-l-4 ${isAdded ? 'bg-purple-50 border-purple-400' : 'bg-orange-50 border-orange-400'}`}>
+                        <div className="flex justify-between items-start">
+                          <div className="flex-1">
+                            <p className="font-semibold text-lg text-gray-900">
+                              {log.roomNumber}호 - 태그 {isAdded ? '추가' : '제거'}
+                            </p>
+                            <div className="mt-2 space-y-1">
+                              <p className="text-sm text-gray-700">
+                                <span className="font-semibold">태그:</span>{' '}
+                                <span className={`px-2 py-1 rounded ${isAdded ? 'bg-purple-200 text-purple-800' : 'bg-orange-200 text-orange-800'}`}>
+                                  {log.tagName}
+                                </span>
+                              </p>
+                              <p className="text-sm text-gray-700">
+                                <span className="font-semibold">시간:</span> {new Date(log.timestamp).toLocaleString('ko-KR')}
+                              </p>
+                              <p className="text-sm text-gray-700">
+                                <span className="font-semibold">작업자:</span>{' '}
+                                <span className="text-blue-600">{log.performedByName}</span>
+                                {log.performedBy === 'admin' && ' (관리자)'}
+                                {log.performedBy === 'worker' && ' (직원)'}
+                              </p>
+                            </div>
+                          </div>
+                          <span className={`text-sm px-3 py-1 rounded font-semibold ${isAdded ? 'bg-purple-100 text-purple-700' : 'bg-orange-100 text-orange-700'}`}>
+                            {isAdded ? '태그 추가' : '태그 제거'}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  }
+                });
               })()}
             </div>
 
@@ -1722,11 +1814,20 @@ const HotelRoomManager = () => {
               <p className="text-sm text-gray-700">
                 <strong>전체 배정 기록:</strong> {assignments.length}건
               </p>
+              <p className="text-sm text-gray-700">
+                <strong>전체 태그 활동:</strong> {assignmentLogs.filter(log => log.type === 'tag_operation').length}건
+              </p>
               {historyFilterDate && (
-                <p className="text-sm text-gray-700 mt-1">
-                  <strong>{historyFilterDate} 기록:</strong>{' '}
-                  {assignments.filter(a => a.date === historyFilterDate).length}건
-                </p>
+                <>
+                  <p className="text-sm text-gray-700 mt-1">
+                    <strong>{historyFilterDate} 배정:</strong>{' '}
+                    {assignments.filter(a => a.date === historyFilterDate).length}건
+                  </p>
+                  <p className="text-sm text-gray-700">
+                    <strong>{historyFilterDate} 태그 활동:</strong>{' '}
+                    {assignmentLogs.filter(log => log.type === 'tag_operation' && log.timestamp.split('T')[0] === historyFilterDate).length}건
+                  </p>
+                </>
               )}
             </div>
           </div>
