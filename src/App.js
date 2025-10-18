@@ -810,6 +810,14 @@ const HotelRoomManager = () => {
     setShowAddTag(false);
   };
 
+  // Remove tag from available tags palette
+  const removeTagFromPalette = (tagId) => {
+    // Only allow removal of custom tags (those with id starting with 'custom-')
+    if (tagId.startsWith('custom-')) {
+      setAvailableTags(availableTags.filter(tag => tag.id !== tagId));
+    }
+  };
+
   // Tag drag handlers
   const handleTagDragStart = (e, tagName) => {
     setDraggedTag(tagName);
@@ -1235,10 +1243,22 @@ const HotelRoomManager = () => {
                       key={tag.id}
                       draggable
                       onDragStart={(e) => handleTagDragStart(e, tag.name)}
-                      className={`${tag.color} text-white px-3 py-2 rounded-full text-sm font-semibold cursor-move hover:shadow-lg transition flex items-center space-x-1`}
+                      className={`${tag.color} text-white px-3 py-2 rounded-full text-sm font-semibold cursor-move hover:shadow-lg transition flex items-center space-x-1 group relative`}
                     >
                       {getTagIcon(tag.icon)}
                       <span>{tag.name}</span>
+                      {tag.id.startsWith('custom-') && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeTagFromPalette(tag.id);
+                          }}
+                          className="ml-1 hover:bg-white hover:bg-opacity-30 rounded-full p-0.5 transition"
+                          title="태그 삭제"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
                       <GripVertical className="w-3 h-3 ml-1 opacity-70" />
                     </div>
                   ))}
