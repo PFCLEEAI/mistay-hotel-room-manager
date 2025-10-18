@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Home, LogOut, Download, Plus, Trash2, CheckCircle, GripVertical, LayoutDashboard, ClipboardList } from 'lucide-react';
+import { Users, Home, LogOut, Download, Plus, Trash2, GripVertical, LayoutDashboard, ClipboardList, Tag, Bed, Droplet, Shirt, X, CheckCircle } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, getDocs, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc } from 'firebase/firestore';
@@ -114,6 +114,16 @@ const HotelRoomManager = () => {
   const [editingWorkerCode, setEditingWorkerCode] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+
+  // Tag states
+  const [availableTags, setAvailableTags] = useState([
+    { id: 'bed', name: '침대추가', color: 'bg-purple-500', icon: 'Bed' },
+    { id: 'water', name: '물', color: 'bg-blue-500', icon: 'Droplet' },
+    { id: 'towel', name: '수건', color: 'bg-green-500', icon: 'Shirt' }
+  ]);
+  const [draggedTag, setDraggedTag] = useState(null);
+  const [newCustomTag, setNewCustomTag] = useState('');
+  const [showAddTag, setShowAddTag] = useState(false);
 
   // Firebase 초기화 및 데이터 로드
   useEffect(() => {
@@ -658,7 +668,7 @@ const HotelRoomManager = () => {
       return;
     }
 
-    const filteredAssignments = assignments.filter(a => 
+    const filteredAssignments = assignments.filter(a =>
       a.date >= exportStartDate && a.date <= exportEndDate
     );
 
@@ -674,6 +684,114 @@ const HotelRoomManager = () => {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, '객실배정');
     XLSX.writeFile(wb, `객실배정-${exportStartDate}-${exportEndDate}.xlsx`);
+  };
+
+  // Tag management functions
+  const addTagToRoom = async (roomId, tagName) => {
+    try {
+      const { updateDoc, doc } = window.firebaseFunctions;
+      const db = window.firebaseDB;
+
+      const room = rooms.find(r => r.id === roomId);
+      if (!room) return;
+
+      const currentTags = room.tags || [];
+
+      // Don't add duplicate tags
+      if (currentTags.includes(tagName)) return;
+
+      const updatedTags = [...currentTags, tagName];
+
+      if (room.firestoreId) {
+        await updateDoc(doc(db, 'rooms', room.firestoreId), {
+          tags: updatedTags
+        });
+      } else {
+        // Update local state for rooms without firestoreId
+        setRooms(rooms.map(r =>
+          r.id === roomId ? { ...r, tags: updatedTags } : r
+        ));
+      }
+    } catch (error) {
+      console.error('태그 추가 오류:', error);
+      alert('태그 추가 중 오류가 발생했습니다.');
+    }
+  };
+
+  const removeTagFromRoom = async (roomId, tagName) => {
+    try {
+      const { updateDoc, doc } = window.firebaseFunctions;
+      const db = window.firebaseDB;
+
+      const room = rooms.find(r => r.id === roomId);
+      if (!room) return;
+
+      const currentTags = room.tags || [];
+      const updatedTags = currentTags.filter(t => t !== tagName);
+
+      if (room.firestoreId) {
+        await updateDoc(doc(db, 'rooms', room.firestoreId), {
+          tags: updatedTags
+        });
+      } else {
+        // Update local state for rooms without firestoreId
+        setRooms(rooms.map(r =>
+          r.id === roomId ? { ...r, tags: updatedTags } : r
+        ));
+      }
+    } catch (error) {
+      console.error('태그 제거 오류:', error);
+      alert('태그 제거 중 오류가 발생했습니다.');
+    }
+  };
+
+  const addCustomTag = () => {
+    if (!newCustomTag.trim()) return;
+
+    const customTag = {
+      id: `custom-${Date.now()}`,
+      name: newCustomTag.trim(),
+      color: 'bg-orange-500',
+      icon: 'Tag'
+    };
+
+    setAvailableTags([...availableTags, customTag]);
+    setNewCustomTag('');
+    setShowAddTag(false);
+  };
+
+  // Tag drag handlers
+  const handleTagDragStart = (e, tagName) => {
+    setDraggedTag(tagName);
+    e.dataTransfer.effectAllowed = 'copy';
+  };
+
+  const handleTagDrop = async (e, roomId) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (draggedTag) {
+      await addTagToRoom(roomId, draggedTag);
+      setDraggedTag(null);
+    }
+  };
+
+  const handleTagDragOver = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'copy';
+  };
+
+  // Helper function to render tag icon
+  const getTagIcon = (iconName) => {
+    const iconProps = { className: "w-3 h-3" };
+    switch(iconName) {
+      case 'Bed': return <Bed {...iconProps} />;
+      case 'Droplet': return <Droplet {...iconProps} />;
+      case 'Shirt': return <Shirt {...iconProps} />;
+      case 'Tag': return <Tag {...iconProps} />;
+      default: return <Tag {...iconProps} />;
+    }
   };
 
   // Loading screen
@@ -829,30 +947,65 @@ const HotelRoomManager = () => {
                 오늘 배정된 객실이 없습니다
               </div>
             ) : (
-              todayAssignments.map(assignment => (
-                <div
-                  key={assignment.firestoreId || assignment.id}
-                  className={`bg-white rounded-lg shadow-md p-4 ${assignment.completed ? 'opacity-60' : ''}`}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-4">
-                      <div className={`w-12 h-12 rounded-full flex items-center justify-center ${assignment.completed ? 'bg-green-100' : 'bg-blue-100'}`}>
-                        <Home className={`w-6 h-6 ${assignment.completed ? 'text-green-600' : 'text-blue-600'}`} />
+              todayAssignments.map(assignment => {
+                const room = rooms.find(r => r.id === assignment.roomId);
+                return (
+                  <div
+                    key={assignment.firestoreId || assignment.id}
+                    className={`rounded-lg shadow-md p-4 transition ${assignment.completed ? 'bg-red-50 bg-opacity-50 border-2 border-red-400' : 'bg-white'}`}
+                  >
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center space-x-4">
+                        <div className={`w-12 h-12 rounded-full flex items-center justify-center ${assignment.completed ? 'bg-red-100' : 'bg-blue-100'}`}>
+                          <Home className={`w-6 h-6 ${assignment.completed ? 'text-red-600' : 'text-blue-600'}`} />
+                        </div>
+                        <div>
+                          <h3 className="text-lg font-semibold">{getRoomNumber(assignment.roomId)}호</h3>
+                          <p className="text-sm text-gray-600">{assignment.date}</p>
+                        </div>
                       </div>
-                      <div>
-                        <h3 className="text-lg font-semibold">{getRoomNumber(assignment.roomId)}호</h3>
-                        <p className="text-sm text-gray-600">{assignment.date}</p>
-                      </div>
+                      {!assignment.completed ? (
+                        <button
+                          onClick={() => toggleCompletion(assignment)}
+                          className="px-4 py-2 text-sm font-medium text-white bg-blue-500 hover:bg-blue-600 rounded-lg transition"
+                        >
+                          청소완료
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => toggleCompletion(assignment)}
+                          className="px-4 py-2 text-sm font-medium text-white bg-red-500 hover:bg-red-600 rounded-lg transition"
+                          title="완료 취소"
+                        >
+                          ✕
+                        </button>
+                      )}
                     </div>
-                    <button
-                      onClick={() => toggleCompletion(assignment)}
-                      className={`p-2 rounded-lg transition ${assignment.completed ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-600 hover:bg-green-500 hover:text-white'}`}
-                    >
-                      <CheckCircle className="w-6 h-6" />
-                    </button>
+                    {/* Tags Display - Important for workers to see requirements */}
+                    {room && room.tags && room.tags.length > 0 && (
+                      <div className="bg-yellow-50 border-2 border-yellow-200 rounded-lg p-3 mt-3">
+                        <p className="text-xs font-semibold text-yellow-800 mb-2">필요 항목:</p>
+                        <div className="flex flex-wrap gap-2">
+                          {room.tags.map((tagName, idx) => {
+                            const tag = availableTags.find(t => t.name === tagName);
+                            const tagColor = tag ? tag.color : 'bg-gray-500';
+                            const tagIcon = tag ? tag.icon : 'Tag';
+                            return (
+                              <div
+                                key={idx}
+                                className={`${tagColor} text-white px-3 py-1.5 rounded-full text-sm font-bold flex items-center space-x-1.5 shadow-md`}
+                              >
+                                {getTagIcon(tagIcon)}
+                                <span>{tagName}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
 
@@ -863,17 +1016,41 @@ const HotelRoomManager = () => {
                 {myAssignments
                   .filter(a => a.date !== new Date().toISOString().split('T')[0])
                   .sort((a, b) => b.date.localeCompare(a.date))
-                  .map(assignment => (
-                    <div key={assignment.firestoreId || assignment.id} className="bg-white rounded-lg shadow p-3 flex justify-between items-center">
-                      <div>
-                        <span className="font-semibold">{getRoomNumber(assignment.roomId)}호</span>
-                        <span className="text-sm text-gray-600 ml-2">{assignment.date}</span>
+                  .map(assignment => {
+                    const room = rooms.find(r => r.id === assignment.roomId);
+                    return (
+                      <div key={assignment.firestoreId || assignment.id} className="bg-white rounded-lg shadow p-3">
+                        <div className="flex justify-between items-center mb-2">
+                          <div>
+                            <span className="font-semibold">{getRoomNumber(assignment.roomId)}호</span>
+                            <span className="text-sm text-gray-600 ml-2">{assignment.date}</span>
+                          </div>
+                          <span className={`text-sm px-2 py-1 rounded ${assignment.completed ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                            {assignment.completed ? '완료' : '대기중'}
+                          </span>
+                        </div>
+                        {/* Tags Display */}
+                        {room && room.tags && room.tags.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-2">
+                            {room.tags.map((tagName, idx) => {
+                              const tag = availableTags.find(t => t.name === tagName);
+                              const tagColor = tag ? tag.color : 'bg-gray-500';
+                              const tagIcon = tag ? tag.icon : 'Tag';
+                              return (
+                                <div
+                                  key={idx}
+                                  className={`${tagColor} text-white px-2 py-0.5 rounded-full text-xs font-semibold flex items-center space-x-1`}
+                                >
+                                  {getTagIcon(tagIcon)}
+                                  <span>{tagName}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
-                      <span className={`text-sm px-2 py-1 rounded ${assignment.completed ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                        {assignment.completed ? '완료' : '대기중'}
-                      </span>
-                    </div>
-                  ))}
+                    );
+                  })}
               </div>
             </div>
           )}
@@ -967,6 +1144,61 @@ const HotelRoomManager = () => {
                 </p>
               </div>
 
+              {/* Tag Palette */}
+              <div className="bg-gradient-to-r from-purple-50 to-blue-50 border-2 border-purple-200 rounded-lg p-4 mb-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-semibold text-gray-700 flex items-center">
+                    <Tag className="w-5 h-5 mr-2 text-purple-600" />
+                    태그 (객실로 드래그하세요)
+                  </h3>
+                  <button
+                    onClick={() => setShowAddTag(!showAddTag)}
+                    className="flex items-center space-x-1 text-sm bg-purple-600 text-white px-3 py-1 rounded-lg hover:bg-purple-700 transition"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>커스텀 태그</span>
+                  </button>
+                </div>
+
+                {showAddTag && (
+                  <div className="mb-3 flex space-x-2">
+                    <input
+                      type="text"
+                      placeholder="태그 이름 입력"
+                      value={newCustomTag}
+                      onChange={(e) => setNewCustomTag(e.target.value)}
+                      onKeyPress={(e) => e.key === 'Enter' && addCustomTag()}
+                      className="flex-1 px-3 py-2 border-2 border-purple-300 rounded-lg focus:border-purple-500 focus:outline-none text-sm"
+                    />
+                    <button
+                      onClick={addCustomTag}
+                      className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition text-sm"
+                    >
+                      추가
+                    </button>
+                  </div>
+                )}
+
+                <div className="flex flex-wrap gap-2">
+                  {availableTags.map(tag => (
+                    <div
+                      key={tag.id}
+                      draggable
+                      onDragStart={(e) => handleTagDragStart(e, tag.name)}
+                      className={`${tag.color} text-white px-3 py-2 rounded-full text-sm font-semibold cursor-move hover:shadow-lg transition flex items-center space-x-1`}
+                    >
+                      {getTagIcon(tag.icon)}
+                      <span>{tag.name}</span>
+                      <GripVertical className="w-3 h-3 ml-1 opacity-70" />
+                    </div>
+                  ))}
+                </div>
+
+                <p className="text-xs text-gray-600 mt-2">
+                  💡 태그를 드래그해서 객실 카드에 놓으면 해당 객실에 태그가 추가됩니다
+                </p>
+              </div>
+
               <div 
                 className="bg-gray-100 rounded-lg p-4 mb-4"
                 onDragOver={handleDragOver}
@@ -985,10 +1217,40 @@ const HotelRoomManager = () => {
                         key={room.id}
                         draggable
                         onDragStart={(e) => handleDragStart(e, room.id)}
+                        onDragOver={handleTagDragOver}
+                        onDrop={(e) => handleTagDrop(e, room.id)}
                         className="bg-white border-2 border-gray-300 rounded-lg p-3 text-center cursor-move hover:border-blue-500 hover:shadow-lg transition"
                       >
                         <GripVertical className="w-4 h-4 mx-auto text-gray-400 mb-1" />
-                        <p className="font-semibold text-sm">{room.number}호</p>
+                        <p className="font-semibold text-sm mb-2">{room.number}호</p>
+                        {/* Tags Display */}
+                        {room.tags && room.tags.length > 0 && (
+                          <div className="flex flex-wrap gap-1 justify-center mt-2">
+                            {room.tags.map((tagName, idx) => {
+                              const tag = availableTags.find(t => t.name === tagName);
+                              const tagColor = tag ? tag.color : 'bg-gray-500';
+                              const tagIcon = tag ? tag.icon : 'Tag';
+                              return (
+                                <div
+                                  key={idx}
+                                  className={`${tagColor} text-white px-2 py-0.5 rounded-full text-xs font-semibold flex items-center space-x-1 group relative`}
+                                >
+                                  {getTagIcon(tagIcon)}
+                                  <span>{tagName}</span>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      removeTagFromRoom(room.id, tagName);
+                                    }}
+                                    className="ml-1 opacity-0 group-hover:opacity-100 transition"
+                                  >
+                                    <X className="w-2.5 h-2.5" />
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     ))
                   )}
@@ -1027,35 +1289,78 @@ const HotelRoomManager = () => {
                         {workerAssignments.length === 0 ? (
                           <p className="text-sm text-gray-400 text-center py-4">여기에 객실을 놓으세요</p>
                         ) : (
-                          workerAssignments.map(assignment => (
-                            <div
-                              key={assignment.firestoreId || assignment.id}
-                              draggable
-                              onDragStart={(e) => handleDragStart(e, assignment.roomId)}
-                              className={`bg-white border-2 rounded-lg p-2 cursor-move hover:shadow-md transition ${assignment.completed ? 'border-green-500 bg-green-50' : 'border-gray-300'}`}
-                            >
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center space-x-2">
-                                  <GripVertical className="w-4 h-4 text-gray-400" />
-                                  <span className="font-semibold">{getRoomNumber(assignment.roomId)}호</span>
+                          workerAssignments.map(assignment => {
+                            const room = rooms.find(r => r.id === assignment.roomId);
+                            return (
+                              <div
+                                key={assignment.firestoreId || assignment.id}
+                                draggable
+                                onDragStart={(e) => handleDragStart(e, assignment.roomId)}
+                                onDragOver={handleTagDragOver}
+                                onDrop={(e) => handleTagDrop(e, assignment.roomId)}
+                                className={`bg-white border-2 rounded-lg p-2 cursor-move hover:shadow-md transition ${assignment.completed ? 'border-red-400 bg-red-50 bg-opacity-50' : 'border-gray-300'}`}
+                              >
+                                <div className="flex items-center justify-between mb-2">
+                                  <div className="flex items-center space-x-2">
+                                    <GripVertical className="w-4 h-4 text-gray-400" />
+                                    <span className="font-semibold">{getRoomNumber(assignment.roomId)}호</span>
+                                  </div>
+                                  <div className="flex items-center space-x-1">
+                                    {!assignment.completed ? (
+                                      <button
+                                        onClick={() => toggleCompletion(assignment)}
+                                        className="px-2 py-1 text-xs font-medium text-white bg-blue-500 hover:bg-blue-600 rounded transition"
+                                      >
+                                        청소완료
+                                      </button>
+                                    ) : (
+                                      <button
+                                        onClick={() => toggleCompletion(assignment)}
+                                        className="px-2 py-1 text-xs font-medium text-white bg-red-500 hover:bg-red-600 rounded transition"
+                                        title="완료 취소"
+                                      >
+                                        ✕
+                                      </button>
+                                    )}
+                                    <button
+                                      onClick={() => removeRoomAssignment(assignment.roomId, dashboardDate)}
+                                      className="p-1 text-red-500 hover:bg-red-50 rounded transition"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </div>
                                 </div>
-                                <div className="flex items-center space-x-1">
-                                  <button
-                                    onClick={() => toggleCompletion(assignment)}
-                                    className={`p-1 rounded transition ${assignment.completed ? 'text-green-600' : 'text-gray-400 hover:text-green-600'}`}
-                                  >
-                                    <CheckCircle className="w-4 h-4" />
-                                  </button>
-                                  <button
-                                    onClick={() => removeRoomAssignment(assignment.roomId, dashboardDate)}
-                                    className="p-1 text-red-500 hover:bg-red-50 rounded transition"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </button>
-                                </div>
+                                {/* Tags Display */}
+                                {room && room.tags && room.tags.length > 0 && (
+                                  <div className="flex flex-wrap gap-1 mt-1">
+                                    {room.tags.map((tagName, idx) => {
+                                      const tag = availableTags.find(t => t.name === tagName);
+                                      const tagColor = tag ? tag.color : 'bg-gray-500';
+                                      const tagIcon = tag ? tag.icon : 'Tag';
+                                      return (
+                                        <div
+                                          key={idx}
+                                          className={`${tagColor} text-white px-2 py-0.5 rounded-full text-xs font-semibold flex items-center space-x-1 group relative`}
+                                        >
+                                          {getTagIcon(tagIcon)}
+                                          <span>{tagName}</span>
+                                          <button
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              removeTagFromRoom(assignment.roomId, tagName);
+                                            }}
+                                            className="ml-1 opacity-0 group-hover:opacity-100 transition"
+                                          >
+                                            <X className="w-2.5 h-2.5" />
+                                          </button>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
                               </div>
-                            </div>
-                          ))
+                            );
+                          })
                         )}
                       </div>
                     </div>
@@ -1150,7 +1455,7 @@ const HotelRoomManager = () => {
                         <span className="mx-2">→</span>
                         <span className="text-blue-600">{getRoomNumber(assignment.roomId)}호</span>
                       </div>
-                      <span className={`text-sm px-2 py-1 rounded ${assignment.completed ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                      <span className={`text-sm px-2 py-1 rounded ${assignment.completed ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>
                         {assignment.completed ? '완료' : '대기중'}
                       </span>
                     </div>
