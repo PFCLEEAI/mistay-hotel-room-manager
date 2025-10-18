@@ -190,6 +190,26 @@ const HotelRoomManager = () => {
           setAssignmentLogs(logsData);
         });
 
+        // Custom Tags 실시간 구독
+        onSnapshot(collection(db, 'customTags'), (snapshot) => {
+          const customTagsData = snapshot.docs.map(doc => ({
+            firestoreId: doc.id,
+            ...doc.data()
+          }));
+
+          // Merge custom tags with default tags
+          const defaultTags = [
+            { id: 'bed', name: '침대추가', color: 'bg-purple-500', icon: 'Bed' },
+            { id: 'bed-x2', name: '침대추가x2', color: 'bg-purple-600', icon: 'Bed' },
+            { id: 'water', name: '물', color: 'bg-blue-500', icon: 'Droplet' },
+            { id: 'towel', name: '수건', color: 'bg-green-500', icon: 'Shirt' },
+            { id: 'towel-x2', name: '수건x2', color: 'bg-green-600', icon: 'Shirt' },
+            { id: 'towel-x4', name: '수건x4', color: 'bg-green-700', icon: 'Shirt' }
+          ];
+
+          setAvailableTags([...defaultTags, ...customTagsData]);
+        });
+
         // Firebase 함수들을 window에 저장
         window.firebaseDB = db;
         window.firebaseAuth = auth;
@@ -795,7 +815,7 @@ const HotelRoomManager = () => {
     }
   };
 
-  const addCustomTag = () => {
+  const addCustomTag = async () => {
     if (!newCustomTag.trim()) return;
 
     const customTag = {
@@ -805,16 +825,43 @@ const HotelRoomManager = () => {
       icon: 'Tag'
     };
 
-    setAvailableTags([...availableTags, customTag]);
-    setNewCustomTag('');
-    setShowAddTag(false);
+    try {
+      if (isFirebaseConfigured && window.firebaseDB) {
+        // Save to Firebase
+        const { collection, addDoc } = window.firebaseFunctions;
+        await addDoc(collection(window.firebaseDB, 'customTags'), customTag);
+      } else {
+        // Fallback to local state if Firebase not configured
+        setAvailableTags([...availableTags, customTag]);
+      }
+      setNewCustomTag('');
+      setShowAddTag(false);
+    } catch (error) {
+      console.error('커스텀 태그 추가 오류:', error);
+      alert('태그 추가 중 오류가 발생했습니다.');
+    }
   };
 
   // Remove tag from available tags palette
-  const removeTagFromPalette = (tagId) => {
+  const removeTagFromPalette = async (tagId) => {
     // Only allow removal of custom tags (those with id starting with 'custom-')
-    if (tagId.startsWith('custom-')) {
-      setAvailableTags(availableTags.filter(tag => tag.id !== tagId));
+    if (!tagId.startsWith('custom-')) return;
+
+    try {
+      if (isFirebaseConfigured && window.firebaseDB) {
+        // Find the Firestore document ID for this custom tag
+        const tagToRemove = availableTags.find(tag => tag.id === tagId);
+        if (tagToRemove && tagToRemove.firestoreId) {
+          const { doc, deleteDoc } = window.firebaseFunctions;
+          await deleteDoc(doc(window.firebaseDB, 'customTags', tagToRemove.firestoreId));
+        }
+      } else {
+        // Fallback to local state if Firebase not configured
+        setAvailableTags(availableTags.filter(tag => tag.id !== tagId));
+      }
+    } catch (error) {
+      console.error('커스텀 태그 삭제 오류:', error);
+      alert('태그 삭제 중 오류가 발생했습니다.');
     }
   };
 
