@@ -118,8 +118,11 @@ const HotelRoomManager = () => {
   // Tag states
   const [availableTags, setAvailableTags] = useState([
     { id: 'bed', name: '침대추가', color: 'bg-purple-500', icon: 'Bed' },
+    { id: 'bed-x2', name: '침대추가x2', color: 'bg-purple-600', icon: 'Bed' },
     { id: 'water', name: '물', color: 'bg-blue-500', icon: 'Droplet' },
-    { id: 'towel', name: '수건', color: 'bg-green-500', icon: 'Shirt' }
+    { id: 'towel', name: '수건', color: 'bg-green-500', icon: 'Shirt' },
+    { id: 'towel-x2', name: '수건x2', color: 'bg-green-600', icon: 'Shirt' },
+    { id: 'towel-x4', name: '수건x4', color: 'bg-green-700', icon: 'Shirt' }
   ]);
   const [draggedTag, setDraggedTag] = useState(null);
   const [newCustomTag, setNewCustomTag] = useState('');
@@ -641,9 +644,23 @@ const HotelRoomManager = () => {
 
       if (assignment.firestoreId) {
         const newCompletedState = !assignment.completed;
-        await updateDoc(doc(db, 'assignments', assignment.firestoreId), {
+        const updateData = {
           completed: newCompletedState
-        });
+        };
+
+        // Add completion details when marking as complete
+        if (newCompletedState) {
+          updateData.completedAt = new Date().toISOString();
+          updateData.completedBy = currentUser ? (currentUser.role === 'admin' ? currentUser.email : currentUser.name) : 'system';
+          updateData.completedByRole = currentUser ? currentUser.role : 'system';
+        } else {
+          // Clear completion details when uncompleting
+          updateData.completedAt = null;
+          updateData.completedBy = null;
+          updateData.completedByRole = null;
+        }
+
+        await updateDoc(doc(db, 'assignments', assignment.firestoreId), updateData);
 
         // Log completion toggle
         await logAssignmentAction(
@@ -652,7 +669,9 @@ const HotelRoomManager = () => {
           assignment.roomId,
           assignment.date,
           {
-            completedAt: newCompletedState ? new Date().toISOString() : null
+            completedAt: newCompletedState ? new Date().toISOString() : null,
+            completedBy: updateData.completedBy,
+            completedByRole: updateData.completedByRole
           }
         );
       }
@@ -1242,9 +1261,10 @@ const HotelRoomManager = () => {
                                       e.stopPropagation();
                                       removeTagFromRoom(room.id, tagName);
                                     }}
-                                    className="ml-1 opacity-0 group-hover:opacity-100 transition"
+                                    className="ml-1 hover:bg-white hover:bg-opacity-20 rounded-full p-0.5 transition"
+                                    title="태그 제거"
                                   >
-                                    <X className="w-2.5 h-2.5" />
+                                    <X className="w-3 h-3" />
                                   </button>
                                 </div>
                               );
@@ -1349,9 +1369,10 @@ const HotelRoomManager = () => {
                                               e.stopPropagation();
                                               removeTagFromRoom(assignment.roomId, tagName);
                                             }}
-                                            className="ml-1 opacity-0 group-hover:opacity-100 transition"
+                                            className="ml-1 hover:bg-white hover:bg-opacity-20 rounded-full p-0.5 transition"
+                                            title="태그 제거"
                                           >
-                                            <X className="w-2.5 h-2.5" />
+                                            <X className="w-3 h-3" />
                                           </button>
                                         </div>
                                       );
@@ -1650,7 +1671,7 @@ const HotelRoomManager = () => {
                 }
 
                 return filteredAssignments.map(assignment => (
-                  <div key={assignment.firestoreId || assignment.id} className="p-4 bg-gray-50 rounded-lg border-l-4 border-blue-400">
+                  <div key={assignment.firestoreId || assignment.id} className={`p-4 rounded-lg border-l-4 ${assignment.completed ? 'bg-green-50 border-green-400' : 'bg-gray-50 border-blue-400'}`}>
                     <div className="flex justify-between items-start mb-2">
                       <div className="flex-1">
                         <p className="font-semibold text-lg text-gray-900">
@@ -1670,6 +1691,21 @@ const HotelRoomManager = () => {
                               {assignment.assignedByRole === 'admin' && ' (관리자)'}
                               {assignment.assignedByRole === 'worker' && ' (직원)'}
                             </p>
+                          )}
+                          {assignment.completed && assignment.completedAt && (
+                            <div className="mt-2 pt-2 border-t border-green-200">
+                              <p className="text-sm text-green-700">
+                                <span className="font-semibold">✓ 완료 시간:</span> {new Date(assignment.completedAt).toLocaleString('ko-KR')}
+                              </p>
+                              {assignment.completedBy && (
+                                <p className="text-sm text-green-700">
+                                  <span className="font-semibold">✓ 완료자:</span>{' '}
+                                  <span className="text-green-800">{assignment.completedBy}</span>
+                                  {assignment.completedByRole === 'admin' && ' (관리자)'}
+                                  {assignment.completedByRole === 'worker' && ' (직원)'}
+                                </p>
+                              )}
+                            </div>
                           )}
                         </div>
                       </div>
